@@ -1,0 +1,28 @@
+# --- API Core & Server (Backend PDF) ---
+fastapi
+uvicorn[standard]
+python-multipart
+requests
+
+# --- Database & Migrations (Backend PDF) ---
+sqlalchemy
+psycopg2-binary
+alembic
+
+# --- Authentication & Security (Backend PDF) ---
+python-jose[cryptography]
+passlib[bcrypt]
+email-validator
+
+# --- AI & Image Processing (AI PDF) ---
+openai
+opencv-python-headless
+numpy
+
+# --- Configuration & Environment ---
+pydantic
+pydantic-settings
+
+# --- Testing (Ortak Tasks) ---
+pytest
+httpx
