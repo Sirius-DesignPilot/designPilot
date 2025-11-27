@@ -1,3 +1,4 @@
+
 # FastAPI Core
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
@@ -33,3 +34,4 @@ httpx==0.25.2
 # Utilities
 aiofiles==23.2.1
 pydantic-settings==2.1.0
+>>>>>>> 65d7308382ff2edbc7bff0ae1e0b3b6e737cd497
