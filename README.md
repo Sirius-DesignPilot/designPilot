@@ -220,10 +220,17 @@ VS Code REST Client
 
 🚧 Geliştirme Yol Haritası
 Özellik	Durum
+
 DWG parse	✅ Temel işlevler tamam
+
 Görsel analiz	⚠️ Geliştirilebilir
+
 AI step generation	✅ Çalışıyor
+
 AI evaluation	⚠️ JSON refining iyileştirilebilir
+
 Drawing rule engine	⚠️ Daha fazla mimari kural eklenebilir
+
 Çoklu model desteği	📝 Yol haritasında
+
 Pro planı & kullanıcı limitleme	📝 Eklenebilir
