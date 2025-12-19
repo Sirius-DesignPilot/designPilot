@@ -51,63 +51,70 @@ export default function ChatPage() {
     }
   };
 
-  const handleSendMessage = async () => {
-  if (!input.trim() && !uploadedImage) return;
+    const handleSendMessage = async () => {
+        if (!input.trim() && !uploadedImage) return;
 
-  const userMessage: Message = {
-    id: Date.now().toString(),
-    role: "user",
-    content: input,
-    image: uploadedImage || undefined,
-    timestamp: new Date(),
-  };
+        const userMessage: Message = {
+            id: Date.now().toString(),
+            role: "user",
+            content: input,
+            image: uploadedImage || undefined,
+            timestamp: new Date(),
+        };
 
-  setMessages((prev) => [...prev, userMessage]);
-  setInput("");
-  setUploadedImage(null);
-  setIsLoading(true);
+        setMessages((prev) => [...prev, userMessage]);
+        setInput("");
+        setUploadedImage(null);
+        setIsLoading(true);
 
-  try {
-    const res = await fetch("http://127.0.0.1:8000/api/v1/ai/generate", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        prompt: userMessage.content,
-        language: "tr",
-      }),
-    });
+        try {
+            const res = await fetch("http://127.0.0.1:8000/api/v1/ai/generate", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    prompt: userMessage.content,
+                    language: "tr",
+                }),
+            });
 
-    if (!res.ok) {
-      throw new Error("Yanıt alınamadı");
-    }
+            // --- DÜZELTME BAŞLANGICI ---
+            const contentType = res.headers.get("content-type");
 
-    const data = await res.json();
+            if (!res.ok || !contentType || !contentType.includes("application/json")) {
+                const errorText = await res.text(); // JSON değilse HTML içeriğini text olarak al
+                console.error("Backend Hatası:", errorText);
+                throw new Error(`Sunucu hatası: ${res.status}`);
+            }
 
-    const aiMessage: Message = {
-      id: Date.now().toString(),
-      role: "assistant",
-      content:
-        data.steps && data.steps.length > 0
-          ? data.steps.join("\n")
-          : "Herhangi bir çizim adımı oluşturulamadı.",
-      timestamp: new Date(),
+            const data = await res.json();
+            // --- DÜZELTME BİTİŞİ ---
+
+            const aiMessage: Message = {
+                id: Date.now().toString(),
+                role: "assistant",
+                content:
+                    data.steps && data.steps.length > 0
+                        ? data.steps.join("\n")
+                        : "Herhangi bir çizim adımı oluşturulamadı.",
+                timestamp: new Date(),
+            };
+
+            setMessages((prev) => [...prev, aiMessage]);
+        } catch (err) {
+            console.error("Fetch Hatası:", err); // Hatayı konsolda görün
+            const errorMessage: Message = {
+                id: Date.now().toString(),
+                role: "assistant",
+                content: "❌ Sunucuya bağlanılamadı veya geçersiz yanıt alındı. Lütfen backend'i kontrol edin.",
+                timestamp: new Date(),
+            };
+            setMessages((prev) => [...prev, errorMessage]);
+        } finally {
+            setIsLoading(false);
+        }
     };
-
-    setMessages((prev) => [...prev, aiMessage]);
-  } catch (err) {
-    const errorMessage: Message = {
-      id: Date.now().toString(),
-      role: "assistant",
-      content: "❌ Sunucudan yanıt alınamadı. Backend çalışıyor mu?",
-      timestamp: new Date(),
-    };
-    setMessages((prev) => [...prev, errorMessage]);
-  } finally {
-    setIsLoading(false);
-  }
-};
 
 
   return (

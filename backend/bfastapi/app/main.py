@@ -4,6 +4,9 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+from fastapi import FastAPI, UploadFile, File
+from fastapi.responses import Response
+
 # -----------------------------------------------------
 # 1) FASTAPI instance ilk sırada oluşturulmalı
 # -----------------------------------------------------
@@ -109,3 +112,43 @@ async def startup_event():
 @app.get("/")
 def root():
     return {"message": "DesignPilot API is running!"}
+
+
+
+# main.py dosyasındaki mevcut app nesnesine ekleyin
+# bfastapi/app/main.py dosyasındaki ilgili kısmı şu şekilde güncelleyin:
+
+# bfastapi/app/main.py
+
+@app.post("/api/v1/ai/analyze-and-fix")
+async def analyze_and_fix(file: UploadFile = File(...)):
+    try:
+        file_ext = os.path.splitext(file.filename)[1].lower()
+        
+        # 1. GÖRSEL ANALİZ (PNG, JPG, JPEG)
+        if file_ext in [".png", ".jpg", ".jpeg"]:
+            report = await ai_service.analyze_image_visual(file)
+            return {"report": report, "type": "visual_analysis"}
+
+        # 2. CAD ANALİZİ (.DXF)
+        if file_ext == ".dxf":
+            result = await ai_service.analyze_file(file)
+            return {
+                "report": result["ai_analysis"],
+                "errors": result["errors"],
+                "fix_script": ai_service.generate_fix_script(result["ai_analysis"], result["errors"]),
+                "type": "cad_analysis"
+            }
+
+        # 3. DESTEKLENMEYEN DWG UYARISI
+        if file_ext == ".dwg":
+            raise HTTPException(
+                status_code=400,
+                detail="Lütfen .dwg dosyasını AutoCAD'de 'Farklı Kaydet' diyerek .dxf formatına dönüştürüp yükleyin."
+            )
+
+        raise HTTPException(status_code=400, detail=f"Desteklenmeyen dosya türü: {file_ext}")
+
+    except Exception as e:
+        print(f"Hata: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

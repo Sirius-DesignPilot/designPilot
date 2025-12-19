@@ -24,81 +24,87 @@ class DWGParser:
 
         with open(temp_path,"wb") as buffer:
             buffer.write(file.file.read())
-
         file.file.seek(0)
 
         return temp_path
-    def parse(self,file:UploadFile)->Dict[str,Any]:
-        temp_path=self._save_temp_file(file)
+    
+
+    def parse(self, file: UploadFile) -> Dict[str, Any]:
+        temp_path = self._save_temp_file(file)
 
         try:
-            doc=ezdxf.readfile(temp_path)
-            msp=doc.modelspace()
+            doc = ezdxf.readfile(temp_path)
+            msp = doc.modelspace()
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error reading DWG/DXF: {str(e)}",
             )
-        lines=[]
-        circles=[]
-        arcs=[]
-        polylines=[]
-        layers=set()
+            
+        lines, circles, arcs, polylines = [], [], [], []
+        layers = set()
+        blocks, texts = [], []
 
         for entity in msp:
             layers.add(entity.dxf.layer)
 
-            if entity.dsxftype()=="LINE":
+            # Çizgi Analizi
+            if entity.dxftype() == "LINE":
                 lines.append({
-                    "start":[entity.dxf.start.x,entity.dxf.start.y],
-                    "end":[entity.dxf.end.x,entity.dxf.end.y],
-                    "layer":entity.dxf.layer
+                    "start": [entity.dxf.start.x, entity.dxf.start.y],
+                    "end": [entity.dxf.end.x, entity.dxf.end.y],
+                    "layer": entity.dxf.layer
                 })
 
-            elif entity.dxftype() in ["LWPOLYLİNE","POLYLİNE"]:
-                points=[[point[0],point[1]] for point in entity.get_points()]
+            # Poligon Analizi
+            elif entity.dxftype() in ["LWPOLYLINE", "POLYLINE"]:
+                points = [[point[0], point[1]] for point in entity.get_points()]
                 polylines.append({
-                    "points":points,
-                    "is_closed":entity.closed,
-                    "layer":entity.dxf.layer
-                })
-            elif entity.dxftype()=="CIRCLE":
-                circles.append({
-                    "center":[entity.dxf.center.x,entity.dxf.center.y],
-                    "radius":entity.dxf.radius,
-                    "layer":entity.dxf.layer
-                })
-            elif entity.dxftype()=="ARC":
-                arcs.append({
-                    "center":[entity.dxf.center.x,entity.dxf.center.y],
-                    "radius":entity.dxf.radius,
-                    "start_angle":entity.dxf.start_angle,
-                    "end_angle":entity.dxf.end_angle,
-                    "layer":entity.dxf.layer
+                    "points": points,
+                    "is_closed": entity.closed,
+                    "layer": entity.dxf.layer
                 })
 
+            # Blok Analizi (Kapı, Pencere vb.)
+            elif entity.dxftype() == "INSERT":
+                blocks.append({
+                    "name": entity.dxf.name,
+                    "insert": [entity.dxf.insert.x, entity.dxf.insert.y],
+                    "layer": entity.dxf.layer,
+                    "rotation": entity.dxf.rotation
+                })
 
-        parsed={
-            "layers":list(layers),
-            "entities":{
-                "lines":lines,
-                "circles":circles,
-                "arcs":arcs,
-                "polylines":polylines
+            # Metin Analizi (Oda isimleri vb.)
+            elif entity.dxftype() in ["TEXT", "MTEXT"]:
+                texts.append({ # BURASI DÜZELTİLDİ: parse.append yerine texts.append
+                    "content": entity.plain_text() if hasattr(entity, 'plain_text') else entity.dxf.text,
+                    "insert": [entity.dxf.insert.x, entity.dxf.insert.y],
+                    "layer": entity.dxf.layer
+                })
+        
+        # Sonuç Sözlüğünü Oluşturma
+        parsed_result = { # BURASI DÜZELTİLDİ: Fonksiyon ismiyle çakışmaması için parsed_result kullanıldı
+            "layers": list(layers),
+            "entities": {
+                "lines": lines,
+                "circles": circles,
+                "arcs": arcs,
+                "polylines": polylines,
+                "blocks": blocks,
+                "texts": texts
             },
-            "statistics":{
-                "line_count":len(lines),
-                "polyline_count":len(polylines),
-                "circle_count":len(circles),
-                "arc_count":len(arcs)
+            "statistics": {
+                "line_count": len(lines),
+                "block_count": len(blocks),
+                "text_count": len(texts)
             }
         }
 
-        try:
+        if os.path.exists(temp_path):
             os.remove(temp_path)
-        except Exception:
-            pass
+
+        return parsed_result
+    
 
 
-        return parsed
-
+    

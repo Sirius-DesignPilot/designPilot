@@ -119,6 +119,32 @@ class CADRuleEngine:
                 errors.append(f"Non-standard layer detected: {layer}")
 
         return errors
+    
+
+    def check_duplicate_lines(self, lines: List[Dict]) -> List[str]:
+        """Üst üste binen veya aynı olan çizgileri bulur."""
+        errors = []
+
+        for i, l1 in enumerate(lines):
+          for j, l2 in enumerate(lines):
+            if i >= j: continue
+            if (l1["start"] == l2["start"] and l1["end"] == l2["end"]) or \
+               (l1["start"] == l2["end"] and l1["end"] == l2["start"]):
+                errors.append(f"Duplicate line detected between #{i} and #{j}")
+    
+        return errors
+
+
+
+    def check_ortho_mode(self, lines: List[Dict]) -> List[str]:
+        """Çizgilerin tam dikey veya tam yatay olup olmadığını denetler (Ortho Mode)."""
+        errors = []
+        for i, line in enumerate(lines):
+          angle = self._line_angle(line) % 90
+          if 0.5 < angle < 89.5: # 0.5 dereceden fazla sapma varsa
+            errors.append(f"Line #{i} is slightly off-axis (Angle: {angle:.2f}°)")
+        return errors
+    
 
     
     def evaluate(self, geometry_json: Dict[str, Any]) -> List[str]:

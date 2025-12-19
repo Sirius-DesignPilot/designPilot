@@ -1,5 +1,6 @@
 
-
+import base64
+import re
 import os
 import json
 from typing import Optional, List, Literal
@@ -9,6 +10,9 @@ from pydantic import BaseModel
 from bfastapi.app.utils.dwg_parser import DWGParser
 from bfastapi.app.utils.image_analyzer import ImageAnalyzer
 from bfastapi.app.utils.cad_rules import CADRuleEngine
+from bfastapi.app.utils.dwg_parser import DWGParser
+from bfastapi.app.utils.cad_rules import CADRuleEngine
+
 
 class EvaluationRequest(BaseModel):
     steps: List[str]
@@ -56,49 +60,51 @@ class AIService:
 
 
     async def analyze_file(self, file: UploadFile):
-        filename = file.filename.lower()
+    # 1. Geometriyi ezdxf ile oku
+       geometry = self.dwg_parser.parse(file) 
+    
+    # 2. Matematiksel hataları kural motoruyla bul (boşluklar, katmanlar vb.)
+       errors = self.rules.evaluate(geometry)
 
-       
-        if filename.endswith((".dwg", ".dxf")):
-            geometry = self.dwg_parser.parse(file)
-        else:
-            geometry = self.image_analyzer.analyze(file)
+    # 3. AI'ya verileri göndererek teknik rapor oluştur
+       ai_text = self._ai_analysis_prompt(geometry, errors)
+       ai_response = self._call_groq(ai_text) 
 
-        
-        errors = self.rules.evaluate(geometry)
-
-        
-        ai_text = self._ai_analysis_prompt(geometry, errors)
-        ai_response = self._call_groq(ai_text)
-
-        return {
-            "geometry": geometry,
-            "errors": errors,
-            "ai_analysis": ai_response
-        }
+       return {
+        "report": ai_response,
+        "raw_errors": errors
+    }
 
     
     def _ai_analysis_prompt(self, geometry, errors):
-        return f"""
-You are an expert CAD drawing inspector and AutoCAD expert.
+    # Bu metodun en başına JSON kütüphanesini import ettiğinizden emin olun
+    
+    
+     return f"""
+Sen profesyonel bir Kıdemli Mimari Denetçi ve AutoCAD uzmanısın. 
+Görevin: Genel tavsiye vermek değil, aşağıdaki teknik verileri analiz ederek spesifik hataları listelemektir.
 
-Geometry extracted from drawing:
+[CAD GEOMETRİ VERİSİ]
 {json.dumps(geometry, indent=2)}
 
-Detected issues:
+[KURAL MOTORU TESPİTLERİ]
 {json.dumps(errors, indent=2)}
 
-Provide:
-1. Explanation of each error
-2. Fix instructions with exact AutoCAD commands
-3. Best practices for architectural drafting
-4. Suggestions to improve the drawing
+Lütfen yanıtını ŞU FORMATTA hazırla (Başka açıklama ekleme):
+
+### 🛠 Teknik Hata Analizi
+- **Geometrik Hatalar:** (Örn: "0.5 birimden küçük boşluklar: L12 ve L45 uçları birleşmiyor.")
+- **Katman Hataları:** (Örn: "A-DOOR katmanında olması gereken bloklar 0 katmanında.")
+- **Metin Uyumsuzlukları:** (Örn: "Mekan ismi 'GARAJ' ancak alan hesaplaması 12m2'nin altında.")
+
+### 🚀 Düzeltme Reçetesi (AutoCAD Çözümleri)
+- **Hata:** [Spesifik Tanım]
+- **Kesin Çözüm:** [AutoCAD Komutu: Örn. _FILLET, _JOIN, _CHSPACE]
+- **Uygulama:** [Teknik uygulama adımı]
+
+### 💡 Profesyonel Tavsiyeler
+- Çizim performansını artırmak için `OVERKILL` ve `PURGE` önerileri.
 """
-
-   
-
-    print("🟦 MODEL ÇAĞRILIYOR (llama-3.1-70b-versatile)")
-
     def _call_groq(self, prompt: str) -> str:
         try:
             completion = self.client.chat.completions.create(
@@ -164,8 +170,51 @@ Provide:
             overall_score=parsed.get("overall_score", 0.0),
             note=parsed.get("note")
         )
+    
 
-    def build_generation_prompt(prompt: str, language="tr"):
+    def generate_autocad_script(self, ai_analysis: str) -> str:
+        """
+        AI analizinden AutoCAD komutlarını ayıklar ve .scr içeriği oluşturur.
+        """
+        script_commands = []
+        # AI yanıtındaki komutları yakalamak için basit bir regex veya anahtar kelime taraması
+        if "OVERKILL" in ai_analysis.upper():
+            script_commands.append("_OVERKILL _ALL  _Accept")
+        if "PURGE" in ai_analysis.upper():
+            script_commands.append("-PURGE _All * _No")
+        if "REGEN" in ai_analysis.upper():
+            script_commands.append("_REGEN")
+            
+        return "\n".join(script_commands)
+    
+    def generate_fix_script(self, ai_analysis: str, errors: List[str]) -> str:
+        """
+        AI raporunu ve kural motoru hatalarını tarayarak bir .scr dosyası içeriği oluşturur.
+        """
+        script_commands = ["(princ \"\\nAI Otomatik Düzeltme Baslatiliyor...\\n\")"]
+        
+        # 1. Genel Temizlik Komutları (Analiz raporuna göre tetiklenir)
+        analysis_upper = ai_analysis.upper()
+        if "OVERKILL" in analysis_upper:
+            script_commands.append("_OVERKILL _ALL  _Accept")
+        if "PURGE" in analysis_upper:
+            script_commands.append("-PURGE _All * _No")
+        if "AUDIT" in analysis_upper or "HATA" in analysis_upper:
+            script_commands.append("_AUDIT _Yes")
+            
+        # 2. Katman Standartlaştırma (Kural motoru çıktılarına göre)
+        for error in errors:
+            if "Non-standard layer" in error:
+                # Örn: "Non-standard layer detected: 0" -> Standart bir katmana taşıma önerisi
+                bad_layer = error.split(":")[-1].strip()
+                script_commands.append(f"-LAYER _Set A-WALL _Ch {bad_layer}  ")
+
+        script_commands.append("_REGEN")
+        script_commands.append("(princ \"\\nDüzeltmeler Tamamlandi.\\n\")")
+        
+        return "\n".join(script_commands)
+
+    def build_generation_prompt(self,prompt: str, language="tr"):
         return f"""
 Sen profesyonel bir mimari çizim ve CAD asistanısın.
 Görevin: Kullanıcının çizim isteğini teknik olarak doğru, adım adım açıklayan bir çizim yönergesi oluşturmaktır.
@@ -184,7 +233,7 @@ FORMAT:
 }}
 
 KULLANICI İSTEĞİ:
-{prompt}"""
+    {prompt}"""
 
 
     def _clean_json(self, text: str) -> str:
@@ -193,4 +242,60 @@ KULLANICI İSTEĞİ:
             cleaned = cleaned.split("\n", 1)[-1].strip()
         if cleaned.endswith("```"):
             cleaned = cleaned[:-3].strip()
+
+            cleaned = re.sub(r'[\x00-\x1f]', '', cleaned, flags=re.UNICODE)
+        
         return cleaned
+    
+
+    
+    # ai/service.py
+    async def analyze_image_visual(self, file: UploadFile):
+            """Resim dosyalarını (PNG, JPEG) Vision modeliyle analiz eder."""
+            try:
+                # Dosyayı oku ve base64 formatına çevir
+                content = await file.read()
+                encoded_image = base64.b64encode(content).decode('utf-8')
+
+                # Teknik denetçi promptu
+                prompt = """
+                Sen bir Mimari Proje Denetçisiyim.
+                Bu görseldeki çizimi teknik olarak incele.
+                SADECE şunları listele:
+                1. Görseldeki teknik hatalar (ölçek, yerleşim, sembol hataları).
+                2. Mimari standartlara aykırı durumlar.
+                3. Çözüm önerileri.
+                Format: ### ❌ Teknik Hata Listesi ... ### 🚀 Çözüm Önerileri ...
+                """
+
+                # Not: Burada kullandığınız API'nin (Groq Llama-3-Vision vb.)
+                # vision metodunu çağırmalısınız.
+                return await self._call_vision_model(prompt, encoded_image)
+            except Exception as e:
+                return f"Görsel analiz hatası: {str(e)}"
+
+    async def analyze_file(self, file: UploadFile):
+            """DXF dosyalarını parser üzerinden analiz eder."""
+            
+            parser = DWGParser()
+            rule_engine = CADRuleEngine()
+
+            # Geometri verilerini çıkar
+            geometry = parser.parse(file)
+            # Kurallara göre hataları bul
+            errors = rule_engine.evaluate(geometry)
+
+            # AI'ya teknik rapor hazırlat
+            prompt = f"Geometri: {geometry}\nSistem Hataları: {errors}\nBu verileri profesyonel bir rapor haline getir."
+            ai_analysis = await self._call_groq(prompt)
+
+            return {
+                "ai_analysis": ai_analysis,
+                "errors": errors,
+                "geometry": geometry
+            }
+
+    def generate_fix_script(self, analysis, errors):
+            """AutoCAD için LISP/Script üretir."""
+            # Basit bir script üretim mantığı
+            return "(command \"_AUDIT\" \"Y\")\n(command \"_PURGE\" \"A\" \"*\" \"N\")"
