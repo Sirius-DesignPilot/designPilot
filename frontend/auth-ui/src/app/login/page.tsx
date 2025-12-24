@@ -18,21 +18,26 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ emailOrTc, password }),
-      });
+        const response = await fetch("http://localhost:8000/api/v1/auth/token", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                username: emailOrTc,
+                password: password,
+            }),
+        });
 
-      const data = await response.json();
+        const data = await response.json();
 
-      if (response.ok && data.token) {
-        localStorage.setItem('isLoggedIn', 'true');
-        localStorage.setItem('token', data.token);
-        router.push('/chat');
-      } else {
-        setError(data.message || 'Giriş başarısız');
-      }
+        if (response.ok && data.access_token) {
+            localStorage.setItem('token', data.access_token);
+            router.push('/chat');
+        } else {
+            setError(data.detail || "Giriş başarısız");
+        }
+
     } catch (error) {
       console.error('Login error:', error);
       setError('Sunucuya bağlanılamadı');

@@ -1,16 +1,15 @@
-
 import base64
 import re
 import os
 import json
-from typing import Optional, List, Literal
+from typing import Optional, List, Literal, Any
+
 from fastapi import UploadFile
 from groq import Groq
 from pydantic import BaseModel
+
 from bfastapi.app.utils.dwg_parser import DWGParser
 from bfastapi.app.utils.image_analyzer import ImageAnalyzer
-from bfastapi.app.utils.cad_rules import CADRuleEngine
-from bfastapi.app.utils.dwg_parser import DWGParser
 from bfastapi.app.utils.cad_rules import CADRuleEngine
 
 
@@ -43,122 +42,178 @@ class GenerationResponse(BaseModel):
 
 
 class AIService:
-
     def __init__(self):
         self.dwg_parser = DWGParser()
         self.image_analyzer = ImageAnalyzer()
         self.rules = CADRuleEngine()
 
-        
         api_key = os.getenv("GROQ_API_KEY")
         if not api_key:
             raise RuntimeError("GROQ_API_KEY ortam değişkeni bulunamadı.")
         self.client = Groq(api_key=api_key)
 
-        
-        self.model ="llama-3.3-70b-versatile"  
+        self.model = "llama-3.3-70b-versatile"
 
+    # ------------------------------------------------------------------
+    # 1) CAD DOSYA ANALİZİ (DXF/DWG)  → teknik rapor + kural motoru
+    # ------------------------------------------------------------------
+    async def analyze_file(self, file: UploadFile) -> dict:
+        """
+        DXF/DWG dosyasını parse eder, rule engine ile hataları bulur
+        ve AI'dan teknik analiz raporu üretir.
+        """
+        # 1. Geometriyi oku
+        geometry = self.dwg_parser.parse(file)
 
-    async def analyze_file(self, file: UploadFile):
-    # 1. Geometriyi ezdxf ile oku
-       geometry = self.dwg_parser.parse(file) 
-    
-    # 2. Matematiksel hataları kural motoruyla bul (boşluklar, katmanlar vb.)
-       errors = self.rules.evaluate(geometry)
+        # 2. Kurallara göre hataları bul
+        errors = self.rules.evaluate(geometry)
 
-    # 3. AI'ya verileri göndererek teknik rapor oluştur
-       ai_text = self._ai_analysis_prompt(geometry, errors)
-       ai_response = self._call_groq(ai_text) 
+        # 3. Teknik analiz promptunu hazırla
+        prompt = self._ai_analysis_prompt(geometry, errors)
 
-       return {
-        "report": ai_response,
-        "raw_errors": errors
-    }
+        # 4. Groq'a gönder
+        ai_response = self._call_groq(prompt)
 
-    
-    def _ai_analysis_prompt(self, geometry, errors):
-    # Bu metodun en başına JSON kütüphanesini import ettiğinizden emin olun
-    
-    
-     return f"""
-Sen profesyonel bir Kıdemli Mimari Denetçi ve AutoCAD uzmanısın. 
-Görevin: Genel tavsiye vermek değil, aşağıdaki teknik verileri analiz ederek spesifik hataları listelemektir.
+        return {
+            "ai_analysis": ai_response,
+            "errors": errors,
+            "geometry": geometry,
+        }
+
+    def _ai_analysis_prompt(self, geometry: Any, errors: Any) -> str:
+        """
+        Kural motoru + geometri verisini kullanarak modeli
+        sadece teknik analiz yapmaya zorlayan prompt.
+        """
+        return f"""
+Sen kıdemli bir Mimari CAD Denetim Uzmanısın.
+SADECE aşağıdaki verileri kullanarak teknik rapor yazacaksın:
+
+- CAD geometry verisi
+- Rule Engine hataları
+
+❌ ASLA YAPMAYACAKSIN:
+- Kullanıcıya eğitim vermek
+- “kontrol edin, inceleyin, bakın, çizimi açın” gibi genel ifadeler
+- Tahmine dayalı hata üretmek
+- Veri dışı yorum yapmak
+
+EĞER HİÇ HATA YOKSA:
+"Hiç hata bulunamadı. Çizim teknik standartlara uygundur." yaz.
+Başka hiçbir şey ekleme.
+
+---
 
 [CAD GEOMETRİ VERİSİ]
-{json.dumps(geometry, indent=2)}
+{json.dumps(geometry, indent=2, ensure_ascii=False)}
 
-[KURAL MOTORU TESPİTLERİ]
-{json.dumps(errors, indent=2)}
+[TEKNİK HATA KAYITLARI]
+{json.dumps(errors, indent=2, ensure_ascii=False)}
 
-Lütfen yanıtını ŞU FORMATTA hazırla (Başka açıklama ekleme):
+---
+
+YANIT FORMATIN KESİNLİKLE BU OLACAK:
 
 ### 🛠 Teknik Hata Analizi
-- **Geometrik Hatalar:** (Örn: "0.5 birimden küçük boşluklar: L12 ve L45 uçları birleşmiyor.")
-- **Katman Hataları:** (Örn: "A-DOOR katmanında olması gereken bloklar 0 katmanında.")
-- **Metin Uyumsuzlukları:** (Örn: "Mekan ismi 'GARAJ' ancak alan hesaplaması 12m2'nin altında.")
+Her hata şu formatta olmalı:
+- ID: (Rule Engine id)
+- Tür: geometry | layer | dimension | naming
+- Eleman: entity id
+- Açıklama: kısa ama net teknik açıklama
 
-### 🚀 Düzeltme Reçetesi (AutoCAD Çözümleri)
-- **Hata:** [Spesifik Tanım]
-- **Kesin Çözüm:** [AutoCAD Komutu: Örn. _FILLET, _JOIN, _CHSPACE]
-- **Uygulama:** [Teknik uygulama adımı]
+### 🚀 Düzeltme Reçetesi
+Her hata için:
+- **Hata:** kısa başlık
+- **AutoCAD Çözümü:** (örn: _JOIN, _FILLET, _AUDIT, -LAYER SET …)
+- **Uygulama Adımları:** teknik işlem sırası
 
-### 💡 Profesyonel Tavsiyeler
-- Çizim performansını artırmak için `OVERKILL` ve `PURGE` önerileri.
+### 💡 Profesyonel Öneriler
+(en fazla 3 madde, sadece teknik)
 """
+
     def _call_groq(self, prompt: str) -> str:
+        """
+        Metin tabanlı teknik analiz için Groq LLM çağrısı.
+        """
         try:
             completion = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You are a professional CAD expert."},
-                    {"role": "user", "content": prompt}
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a STRICT CAD technical inspection AI. "
+                            "You ONLY talk about technical issues explicitly shown in the provided data. "
+                            "You NEVER give generic training instructions like 'open the drawing, check layers'. "
+                            "You NEVER guess missing information. "
+                            "If there are no errors, you say exactly: "
+                            "\"Hiç hata bulunamadı. Çizim teknik standartlara uygundur.\""
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
                 ],
-                temperature=0.2,
-                max_tokens=4096,
+                temperature=0.15,
+                max_tokens=3500,
             )
-            return completion.choices[0].message["content"]
+
+            return completion.choices[0].message.content
         except Exception as e:
             return f"Groq API Error: {str(e)}"
 
+    # ------------------------------------------------------------------
+    # 2) ADIM ÜRETME (metin prompt → JSON steps)
+    # ------------------------------------------------------------------
+    
     async def generate_steps(self, req: GenerationRequest) -> GenerationResponse:
-        print("🟦 AIService.generate_steps ÇAĞRILDI")
-        print("🟦 Prompt:", req.prompt)
+      print("🟦 AIService.generate_steps ÇAĞRILDI")
+      print("🟦 Prompt:", req.prompt)
 
-        system_prompt = self.build_generation_prompt(req.prompt)
+      text = req.prompt.lower()
 
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Lütfen JSON formatında yanıtla: {req.prompt}"}
-        ]
+    # 🔹 Hata / analiz odaklı mı, yoksa normal çizim isteği mi?
+      hata_anahtar_kelimeler = ["hata", "analiz", "hatalarını", "hatalarini", "hata analizi"]
 
-        try:
-            completion = self.client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=messages,
-            )
-        except Exception as e:
-            raise RuntimeError(f"Model çağrısı hatası: {e}")
+      if any(kw in text for kw in hata_anahtar_kelimeler):
+        # HATA ANALİZ MODU
+        system_prompt = self.build_error_analysis_prompt(req.prompt, req.language or "tr")
+      else:
+        # NORMAL ÇİZİM ADIMI MODU
+        system_prompt = self.build_generation_prompt(req.prompt, req.language or "tr")
 
-        raw = completion.choices[0].message.content.strip()
-        cleaned = self._clean_json(raw)
+      messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"Lütfen JSON formatında yanıtla: {req.prompt}"},
+      ]
 
-        parsed = json.loads(cleaned)
-        return GenerationResponse(
-            title=parsed.get("title", req.prompt),
-            steps=parsed.get("steps", [])
+      try:
+        completion = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
         )
+      except Exception as e:
+        raise RuntimeError(f"Model çağrısı hatası: {e}")
+
+      raw = completion.choices[0].message.content.strip()
+      cleaned = self._clean_json(raw)
+      parsed = json.loads(cleaned)
+
+      return GenerationResponse(
+        title=parsed.get("title", req.prompt),
+        steps=parsed.get("steps", []),
+      )
+
 
     async def evaluate_drawing(self, req: EvaluationRequest) -> EvaluationResponse:
-        system_prompt = self._build_evaluation_prompt(req.steps)
+        system_prompt = self._build_evaluation_prompt(req.steps, req.language)
 
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": "Sadece geçerli JSON formatında cevap ver."}
+            {"role": "user", "content": "Sadece geçerli JSON formatında cevap ver."},
         ]
 
         completion = self.client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=messages
+            model=self.model,
+            messages=messages,
         )
 
         raw = completion.choices[0].message.content.strip()
@@ -168,73 +223,180 @@ Lütfen yanıtını ŞU FORMATTA hazırla (Başka açıklama ekleme):
         return EvaluationResponse(
             steps=parsed.get("steps", []),
             overall_score=parsed.get("overall_score", 0.0),
-            note=parsed.get("note")
+            note=parsed.get("note"),
         )
-    
 
     def generate_autocad_script(self, ai_analysis: str) -> str:
         """
         AI analizinden AutoCAD komutlarını ayıklar ve .scr içeriği oluşturur.
         """
-        script_commands = []
-        # AI yanıtındaki komutları yakalamak için basit bir regex veya anahtar kelime taraması
-        if "OVERKILL" in ai_analysis.upper():
+        script_commands: List[str] = []
+
+        upper = ai_analysis.upper()
+        if "OVERKILL" in upper:
             script_commands.append("_OVERKILL _ALL  _Accept")
-        if "PURGE" in ai_analysis.upper():
+        if "PURGE" in upper:
             script_commands.append("-PURGE _All * _No")
-        if "REGEN" in ai_analysis.upper():
+        if "REGEN" in upper:
             script_commands.append("_REGEN")
-            
+
         return "\n".join(script_commands)
-    
-    def generate_fix_script(self, ai_analysis: str, errors: List[str]) -> str:
+
+    # ------------------------------------------------------------------
+    # 3) RULE ENGINE + ANALİZ → AutoCAD FIX SCRIPT
+    # ------------------------------------------------------------------
+    def generate_fix_script(self, ai_analysis: str, errors: List[dict]) -> str:
         """
         AI raporunu ve kural motoru hatalarını tarayarak bir .scr dosyası içeriği oluşturur.
+        errors: CADRuleEngine'den gelen structured hata listesi (dict).
         """
-        script_commands = ["(princ \"\\nAI Otomatik Düzeltme Baslatiliyor...\\n\")"]
-        
-        # 1. Genel Temizlik Komutları (Analiz raporuna göre tetiklenir)
-        analysis_upper = ai_analysis.upper()
-        if "OVERKILL" in analysis_upper:
-            script_commands.append("_OVERKILL _ALL  _Accept")
-        if "PURGE" in analysis_upper:
-            script_commands.append("-PURGE _All * _No")
-        if "AUDIT" in analysis_upper or "HATA" in analysis_upper:
-            script_commands.append("_AUDIT _Yes")
-            
-        # 2. Katman Standartlaştırma (Kural motoru çıktılarına göre)
-        for error in errors:
-            if "Non-standard layer" in error:
-                # Örn: "Non-standard layer detected: 0" -> Standart bir katmana taşıma önerisi
-                bad_layer = error.split(":")[-1].strip()
-                script_commands.append(f"-LAYER _Set A-WALL _Ch {bad_layer}  ")
+        script: List[str] = []
+        script.append("(princ \"\\nAI Otomatik Düzeltme Basliyor...\\n\")")
 
-        script_commands.append("_REGEN")
-        script_commands.append("(princ \"\\nDüzeltmeler Tamamlandi.\\n\")")
-        
-        return "\n".join(script_commands)
+        # 1️⃣ Genel temizlik komutları (AI analizine göre)
+        upper = ai_analysis.upper()
+        if "OVERKILL" in upper:
+            script.append("_OVERKILL ALL  ")
+        if "PURGE" in upper:
+            script.append("-PURGE ALL * N")
+        if "AUDIT" in upper or "HATA" in upper:
+            script.append("_AUDIT Y")
 
-    def build_generation_prompt(self,prompt: str, language="tr"):
-        return f"""
-Sen profesyonel bir mimari çizim ve CAD asistanısın.
-Görevin: Kullanıcının çizim isteğini teknik olarak doğru, adım adım açıklayan bir çizim yönergesi oluşturmaktır.
+        # 2️⃣ Spesifik hatalara göre işlem
+        for err in errors:
+            # GEOMETRİ – kapanmayan polyline
+            if (
+                err.get("type") == "geometry"
+                and "Polyline is not closed" in err.get("description", "")
+            ):
+                script.append(f"SELECT {err.get('entity')} _JOIN")
+
+            # LAYER HATASI
+            if err.get("type") == "layer":
+                expected = err.get("expected_layer", "A-WALL")
+                script.append(f"-LAYER SET {expected}")
+                script.append(
+                    f"CHANGE {err.get('entity')} PROPERTIES LAYER {expected}"
+                )
+
+            # ÖRNEK: özel ID'li bir geometri hatası
+            if err.get("id") == "G003":
+                script.append("_FILLET R 0")
+                script.append(f"SELECT {err.get('entity')}")
+
+        script.append("_REGEN")
+        script.append("(princ \"\\nDüzeltmeler Tamamlandi.\\n\")")
+
+        return "\n".join(script)
+
+    # ------------------------------------------------------------------
+    # 4) GENERATION / EVALUATION PROMPT YARDIMCI METODLARI
+    # ------------------------------------------------------------------
+    
+
+    def build_generation_prompt(self, prompt: str, language: str = "tr") -> str:
+     """
+    Normal çizim isteği için (örn. '18.5 cm çapında dişli çark çiz')
+    adım adım ÇİZİM TALİMATI üretir.
+    """
+     return f"""
+Sen profesyonel bir mimari / teknik çizim ve CAD asistanısın.
+Görevin: Kullanıcının çizim isteğini, AutoCAD'de uygulanabilir NET ADIMLARA dönüştürmek.
 
 ❗ ÇOK ÖNEMLİ:
 - SADECE geçerli JSON döndür.
 - JSON dışında **tek bir kelime bile** yazma.
-- "title" mutlaka doldur.
-- "steps" mutlaka DOLU bir liste olsun (boş liste asla döndürme).
-- Adımlar net, uygulanabilir CAD komutları içersin.
+- "title" mutlaka doldur (ör: "18.5 cm Çaplı Dişli Çark Çizimi").
+- "steps" mutlaka DOLU bir liste olsun.
+- Her adım, AutoCAD komut/adımları içeren uygulanabilir bir talimat olsun.
+
+ÖRNEK ADIM YAPISI:
+- "1. AutoCAD'de yeni bir çizim aç, units'i cm olarak ayarla."
+- "2. _CIRCLE komutunu kullanarak merkezde 18.5 cm çapında daire çiz."
+- "3. Diş profilini oluşturmak için ..."
 
 FORMAT:
 {{
   "title": "çizimin kısa açıklaması",
-  "steps": ["Adım 1 ...", "Adım 2 ...", "Adım 3 ..."]
+  "steps": [
+    "1. ...",
+    "2. ...",
+    "3. ..."
+  ]
 }}
 
 KULLANICI İSTEĞİ:
-    {prompt}"""
+{prompt}
+"""
 
+
+
+    def build_error_analysis_prompt(self, prompt: str, language: str = "tr") -> str:
+     """
+    'bu cad çizimindeki hataları analiz et' gibi istekler için,
+    Hata | Olası neden | Çözüm formatında liste üretir.
+    """
+     return f"""
+Sen profesyonel bir mimari çizim ve CAD HATA ANALİZİ asistanısın.
+
+KULLANICI senden metin tabanlı olarak bir çizimin veya çalışmanın
+OLASI HATALARINI ve ÇÖZÜMLERİNİ isteyecek.
+
+Görevin:
+- "Hata: ... | Olası neden: ... | Çözüm: ..." formatında maddeler üretmek.
+- Çözüm kısmında imkân oldukça AutoCAD komutları (_MOVE, _SCALE, _ARRAYPOLAR, _OVERKILL, _AUDIT, _XREF, _BIND, _STYLE vb.) kullanmak.
+
+❌ KESİNLİKLE YAPMAYACAKLARIN:
+- "Çizimi açın, katmanları kontrol edin, zoom yapın" gibi genel prosedür yazmak.
+- Kullanıcıya CAD dersi verir gibi uzun, soyut tavsiyeler yazmak.
+- Çok genel, herkese uyan cümleler üretmek.
+
+✅ YAPACAKLARIN:
+- 5–10 arası net HATA & ÇÖZÜM maddesi üret.
+- Her maddede:
+  - Hata türü
+  - Olası teknik sebep
+  - AutoCAD odaklı çözüm adımları olsun.
+
+SADECE geçerli JSON döndür.
+
+FORMAT:
+{{
+  "title": "analizin başlığı (ör: 'Muhtemel CAD Hata Analizi')",
+  "steps": [
+    "Hata: ... | Olası neden: ... | Çözüm: ...",
+    "Hata: ... | Olası neden: ... | Çözüm: ...",
+    "..."
+  ]
+}}
+
+KULLANICI İSTEĞİ:
+{prompt}
+"""
+
+
+    def _build_evaluation_prompt(
+        self, steps: List[str], language: str = "tr"
+    ) -> str:
+        return f"""
+Sen bir CAD eğitim değerlendirme asistanısın.
+Kullanıcıya verilen adımları değerlendirip, her adım için durum ve yorum döneceksin.
+
+SADECE geçerli JSON döndür.
+
+FORMAT:
+{{
+  "steps": [
+    {{"step_index": 0, "status": "correct", "comment": "Açıklama"}},
+    {{"step_index": 1, "status": "partial", "comment": "Açıklama"}}
+  ],
+  "overall_score": 85.0,
+  "note": "Genel değerlendirme notu"
+}}
+
+DEĞERLENDİRİLECEK ADIMLAR:
+{json.dumps(steps, ensure_ascii=False, indent=2)}
+"""
 
     def _clean_json(self, text: str) -> str:
         cleaned = text.strip()
@@ -243,59 +405,65 @@ KULLANICI İSTEĞİ:
         if cleaned.endswith("```"):
             cleaned = cleaned[:-3].strip()
 
-            cleaned = re.sub(r'[\x00-\x1f]', '', cleaned, flags=re.UNICODE)
-        
+        # Kontrol karakterlerini temizle
+        cleaned = re.sub(r"[\x00-\x1f]", "", cleaned, flags=re.UNICODE)
         return cleaned
-    
 
-    
-    # ai/service.py
-    async def analyze_image_visual(self, file: UploadFile):
-            """Resim dosyalarını (PNG, JPEG) Vision modeliyle analiz eder."""
-            try:
-                # Dosyayı oku ve base64 formatına çevir
-                content = await file.read()
-                encoded_image = base64.b64encode(content).decode('utf-8')
+    # ------------------------------------------------------------------
+    # 5) GÖRSEL ANALİZ (PNG/JPG → vision modeli)
+    # ------------------------------------------------------------------
+    async def analyze_image_visual(self, file: UploadFile) -> str:
+        """
+        Resim dosyalarını (PNG, JPEG) vision modeliyle analiz eder.
+        """
+        try:
+            content = await file.read()
+            encoded_image = base64.b64encode(content).decode("utf-8")
 
-                # Teknik denetçi promptu
-                prompt = """
-                Sen bir Mimari Proje Denetçisiyim.
-                Bu görseldeki çizimi teknik olarak incele.
-                SADECE şunları listele:
-                1. Görseldeki teknik hatalar (ölçek, yerleşim, sembol hataları).
-                2. Mimari standartlara aykırı durumlar.
-                3. Çözüm önerileri.
-                Format: ### ❌ Teknik Hata Listesi ... ### 🚀 Çözüm Önerileri ...
-                """
+            prompt = """
+Sen bir Mimari Proje Denetçisisin.
+Bu görseldeki çizimi teknik olarak incele.
+SADECE şunları listele:
+1. Görseldeki teknik hatalar (ölçek, yerleşim, sembol hataları).
+2. Mimari standartlara aykırı durumlar.
+3. Çözüm önerileri.
+Format: ### ❌ Teknik Hata Listesi ... ### 🚀 Çözüm Önerileri ...
+"""
 
-                # Not: Burada kullandığınız API'nin (Groq Llama-3-Vision vb.)
-                # vision metodunu çağırmalısınız.
-                return await self._call_vision_model(prompt, encoded_image)
-            except Exception as e:
-                return f"Görsel analiz hatası: {str(e)}"
+            return await self._call_vision_model(prompt, encoded_image)
+        except Exception as e:
+            return f"Görsel analiz hatası: {str(e)}"
 
-    async def analyze_file(self, file: UploadFile):
-            """DXF dosyalarını parser üzerinden analiz eder."""
-            
-            parser = DWGParser()
-            rule_engine = CADRuleEngine()
-
-            # Geometri verilerini çıkar
-            geometry = parser.parse(file)
-            # Kurallara göre hataları bul
-            errors = rule_engine.evaluate(geometry)
-
-            # AI'ya teknik rapor hazırlat
-            prompt = f"Geometri: {geometry}\nSistem Hataları: {errors}\nBu verileri profesyonel bir rapor haline getir."
-            ai_analysis = await self._call_groq(prompt)
-
-            return {
-                "ai_analysis": ai_analysis,
-                "errors": errors,
-                "geometry": geometry
-            }
-
-    def generate_fix_script(self, analysis, errors):
-            """AutoCAD için LISP/Script üretir."""
-            # Basit bir script üretim mantığı
-            return "(command \"_AUDIT\" \"Y\")\n(command \"_PURGE\" \"A\" \"*\" \"N\")"
+    async def _call_vision_model(self, prompt: str, image_base64: str) -> str:
+        """
+        Vision destekli modeli çağırmak için basit bir örnek stub.
+        Burayı kullandığın Groq vision modeline göre özelleştirebilirsin.
+        """
+        try:
+            completion = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a CAD vision inspection AI.",
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": prompt,
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{image_base64}"
+                                },
+                            },
+                        ],
+                    },
+                ],
+            )
+            return completion.choices[0].message.content
+        except Exception as e:
+            return f"Groq Vision API Error: {str(e)}"

@@ -147,22 +147,35 @@ class CADRuleEngine:
     
 
     
-    def evaluate(self, geometry_json: Dict[str, Any]) -> List[str]:
-
+    def evaluate(self, geometry):
         errors = []
 
-        
-        if "polygons" in geometry_json["entities"]:
-            errors += self.check_closed_polygons(geometry_json["entities"]["polygons"])
+        # ÖRN: layer hatası
+        for obj in geometry["entities"]:
+           if obj["layer"] not in self.allowed_layers:
+             errors.append({
+                "id": "L001",
+                "type": "layer",
+                "entity": obj["id"],
+                "description": "Non-standard layer detected",
+                "current_layer": obj["layer"],
+                "expected_layer": "A-WALL",
+                "severity": "medium"
+            } )
+             
+        for pl in geometry["polylines"]:
+           if not pl["closed"]:
+            errors.append({
+                "id": "G003",
+                "type": "geometry",
+                "entity": pl["id"],
+                "description": "Polyline is not closed",
+                "severity": "high"
+            })
 
-        # LINES
-        lines = geometry_json["entities"].get("lines", [])
-        if lines:
-            errors += self.check_line_continuity(lines)
-            errors += self.check_parallel_and_perpendicular(lines)
+    
 
-        # DWG layer rules
-        if "layers" in geometry_json:
-            errors += self.check_layer_rules(geometry_json["layers"])
+    # ÖRN: açık polyline
+    
 
         return errors
