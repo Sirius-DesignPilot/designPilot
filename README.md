@@ -1,236 +1,138 @@
-🧩 DesignPilot AI — Akıllı CAD Çizim Asistanı
-AutoCAD / DWG dosyalarını analiz eden, çizim hatalarını tespit eden ve profesyonel çizim yönergeleri oluşturan Yapay Zekâ destekli asistan.
-🚀 Proje Özeti
+DesignPilot – AI Destekli CAD Çizim Asistanı
 
-DesignPilot, mimarlar ve mühendisler için geliştirilmiş bir AI destekli CAD çizim asistanıdır.
-Sistem, DWG veya görsel formatlı çizimleri analiz eder, yapısal hataları belirler ve kullanıcıya profesyonel çizim adımları önerir.
+DesignPilot, mimari ve teknik CAD çizimlerini analiz eden, hataları tespit eden, AutoCAD komutlarıyla çözüm önerileri sunan ve çizim adımları üretebilen FastAPI + Next.js tabanlı akıllı CAD asistanıdır.
 
-🎯 Ana Özellikler
-🔍 1. DWG / Görsel Çizim Analizi
+🚀 Özellikler
 
-AutoCAD DWG / DXF dosyaları okunur (DWGParser)
-
-Görsel tabanlı çizimler işlenir (ImageAnalyzer)
-
-Geometri çıkarımı yapılır
-
-Mimari çizim kurallarına göre hata tespiti yapılır (CADRuleEngine)
-
-🤖 2. Yapay Zekâ ile Çizim Yönergeleri Üretimi
-
-Groq'un LLaMA modelleri kullanılarak:
-
-Kullanıcının verdiği prompt’a göre adım adım çizim rehberleri üretilir
-
-JSON formatında temiz çıktı elde edilir
-
-TR / EN dil desteği mevcuttur
-
-✏️ 3. Çizim Değerlendirme
-
-Kullanıcının kendi çizim adımları AI tarafından analiz edilir:
-
-correct
-
-partial
-
-missing
-
-wrong
-
-Değerlendirme, JSON formatında geri döner.
-
-👤 4. Kullanıcı Yönetimi & Yetkilendirme
-
-JWT tabanlı login / signup
-
-Süper kullanıcı ve normal kullanıcı ayrımı
-
-Kullanıcıya özel analiz listeleri
-
-📊 5. Dashboard & Analiz Geçmişi
-
-Kullanıcının tüm analiz geçmişi listelenir
-
-Backend’den filtrelenmiş veri gelir
-
-🧱 6. Modern Frontend
-
-Next.js 14 (App Router)
-
-Modern UI (TailwindCSS)
-
-Chat benzeri etkileşimli assitant ekranı
+✔ DXF tabanlı CAD dosya analizi
+✔ Geometri ve katman hata tespiti
+✔ AutoCAD komut önerileri (_JOIN, _FILLET, _AUDIT, _OVERKILL vb.)
+✔ Görsel bazlı çizim analizi (image upload)
+✔ Akıllı chat arayüzü
+✔ Kullanıcı girişi ve token yapısı
+✔ Docker destekli çalıştırma
 
 🏗️ Mimari
-designPilot/
-│
-├── backend/
-│   ├── bfastapi/app/
-│   │   ├── api/
-│   │   │   ├── endpoints/
-│   │   │   │   ├── analyze.py
-│   │   │   │   ├── auth.py
-│   │   │   │   ├── dashboard.py
-│   │   │   │   └── health.py
-│   │   │   └── deps.py
-│   │   ├── ai/
-│   │   │   ├── service.py   ← AI beyni
-│   │   │   ├── dwg_parser.py
-│   │   │   ├── image_analyzer.py
-│   │   │   └── cad_rules.py
-│   │   ├── models/
-│   │   │   ├── user.py
-│   │   │   └── analysis.py
-│   │   ├── schemas/
-│   │   │   ├── analysis.py
-│   │   │   └── ai.py
-│   │   ├── services/
-│   │   │   ├── auth_service.py
-│   │   │   ├── user_service.py
-│   │   │   └── analysis_service.py
-│   │   ├── core/
-│   │   │   ├── config.py
-│   │   │   └── security.py
-│   │   └── database.py
-│   └── ai/ (ayrı servis)
-│       └── service.py
-│
-└── frontend/
-    └── auth-ui/src/app/
-        ├── chat/
-        ├── dashboard/
-        ├── login/
-        ├── signup/
-        └── forgot-password/
-
-🧠 AI Servisi Nasıl Çalışıyor?
-✨ Kullanılan Model
-
-Varsayılan model:
-
-llama-3.1-70b-versatile (Groq)
+designPilot
+ ├── backend (FastAPI, AI Service, Rule Engine)
+ ├── frontend/auth-ui (Next.js Chat + Login UI)
+ ├── docker-compose.yml
+ ├── README.md
 
 
-GroqClient şu şekilde başlatılır:
+Backend → FastAPI + AI + Rule Engine
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+Frontend → Next.js + modern chat UI
 
-Çizim Yönergesi Üretimi
-completion = client.chat.completions.create(
-    model="llama-3.1-70b-versatile",
-    messages=[ ... ]
-)
+AI Engine → Groq Llama 3.3
 
+DB → PostgreSQL (opsiyonel)
 
-Modelden gelen çıktı JSON parse edilir ve frontend’e döner.
+⚙️ Kurulum
+🔧 1️⃣ Gereksinimler
 
-📡 Önemli API Endpointleri
-🔵 1) Adım Üretme (AI)
-POST /api/v1/ai/generate
+Docker
 
-Request
-{
-  "prompt": "yarıçapı 30 olan bir daire çiz",
-  "language": "tr"
-}
+Python 3.10+
 
-Response
-{
-  "title": "Daire Çizimi",
-  "steps": [
-    "Çizim düzlemini aç.",
-    "Circle komutunu başlat.",
-    "Merkez noktasını belirle.",
-    "30 cm yarıçapını gir."
-  ]
-}
+Node.js 18+
 
-🔵 2) Çizim Değerlendirme
-POST /api/v1/ai/evaluate
+Groq API Key
 
-🔵 3) Analiz Yönetimi
-GET /api/v1/analyses/list
-POST /api/v1/analyses/
-GET /api/v1/analyses/{id}
-DELETE /api/v1/analyses/{id}
+🐳 Docker ile Çalıştırma (Önerilen)
 
-🗄️ Veritabanı (PostgreSQL)
-Kullanılan tablo:
-analyses
+📌 Proje kökünden:
+
+docker compose up --build
 
 
-Alanlar:
+Sonra:
 
-id
+Backend Docs → http://localhost:8000/docs
 
-user_id
+Frontend UI → http://localhost:3000
+ (veya 3001)
 
-title
-
-input_text
-
-data_input_type
-
-result
-
-created_at
-
-Tüm modeller SQLAlchemy ile tanımlıdır.
-
-🛠️ Kurulum
-1) Backend
-a) Sanal ortam
-python -m venv venv
-venv\Scripts\activate
-
-b) Gereksinimler
+🧪 Local Geliştirme (İsteyenler İçin)
+Backend
+cd backend
 pip install -r requirements.txt
-
-c) .env dosyası oluştur
-GROQ_API_KEY=...
-DATABASE_URL=postgresql+asyncpg://postgres:password@localhost:5432/postgres
-SECRET_KEY=...
-
-d) Backend çalıştır
 uvicorn bfastapi.app.main:app --reload
 
-2) Frontend
+
+Backend açılınca:
+👉 http://127.0.0.1:8000/docs
+
+Frontend (Auth + Chat UI)
 cd frontend/auth-ui
 npm install
 npm run dev
 
-🔐 Kimlik Doğrulama
 
-JWT tabanlı
+👉 http://localhost:3000
 
-Bearer <token> ile istek gönderilir
+🔐 Ortam Değişkenleri
 
-Token üretimi core/security.py içinde yönetilir
+backend/.env.example örneğini .env yapın:
 
-🧪 Test
+GROQ_API_KEY=your_groq_key_here
+ACCESS_TOKEN_EXPIRE_MINUTES=60
+DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/designpilot
 
-API testleri için önerilen araç:
 
-Insomnia
+⚠ .env GitHub’a gönderilmez, sadece localde saklanır.
 
-Postman
+🧠 Kullanım
 
-VS Code REST Client
+Chat ekranından komut yaz:
 
-🚧 Geliştirme Yol Haritası
-Özellik	Durum
+“Bu CAD çizimindeki hataları analiz et”
 
-DWG parse	✅ Temel işlevler tamam
+“18.5 cm çaplı dişli çark için teknik çizim adımları oluştur”
 
-Görsel analiz	⚠️ Geliştirilebilir
+DXF / PNG / JPG yükleyerek analiz al
 
-AI step generation	✅ Çalışıyor
+AI teknik hata raporu döner:
 
-AI evaluation	⚠️ JSON refining iyileştirilebilir
+Hata açıklaması
 
-Drawing rule engine	⚠️ Daha fazla mimari kural eklenebilir
+Nedenler
 
-Çoklu model desteği	📝 Yol haritasında
+Çözüm
 
-Pro planı & kullanıcı limitleme	📝 Eklenebilir
+AutoCAD komutları
+
+🛠️ Teknolojiler
+
+FastAPI
+
+Next.js
+
+Groq AI
+
+PostgreSQL
+
+Docker
+
+ezDXF / CAD Processing
+
+📌 Notlar
+
+DWG desteklenmez → DXF’e dönüştürüp yükleyin
+
+Vision analizi PNG/JPG destekler
+
+Rule Engine gelişmeye açıktır
+
+🤝 Katkı
+
+PR açabilirsiniz 🎉
+Branch yapısı:
+
+main → stabil
+dev → geliştirme
+feature/* → özellik geliştirme
+
+👤 Geliştiren
+
+DesignPilot AI Team
