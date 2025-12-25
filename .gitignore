@@ -20,3 +20,7 @@ out/
 Thumbs.db
 .vscode/
 .idea/
+
+
+backend/venv/
+frontend/auth-ui/node_modules/
